@@ -1,6 +1,9 @@
 import express from "express";
 import cors from "cors";
-import { requireAuth } from "./middlewares/auth.middleware.js";
+import authRoutes from "./routes/auth.routes.js";
+import catchRoutes from "./routes/catch.routes.js";
+import consumerRoutes from "./routes/consumer.routes.js";
+
 
 const app = express();
 
@@ -11,17 +14,11 @@ app.get("/health", (req, res) => {
   res.send({ status: "Backend is running" });
 });
 
-app.get("/test/ping", (req, res) => {
-  res.json({ message: "pong" });
-});
+app.use("/auth", authRoutes); // Auth routes
+app.use("/catch", catchRoutes); // Catch routes
+app.use("/consumer", consumerRoutes); // Consumer routes
 
-app.get("/me", requireAuth, (req, res) => {
-  res.json({
-    uid: req.user.uid,
-    email: req.user.email || null,
-    role: req.user.role || "Unassigned"
-  });
-});
+
 
 
 export default app;

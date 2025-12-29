@@ -13,7 +13,7 @@ export const createConsumerScan = async (req, res) => {
         const imageUrl = await uploadImage(
             req.file.buffer,
             req.file.mimetype,
-            `consumer-scans/${consumerId}`
+            `consumer_scans/${consumerId}`
         );
 
         // Create scan record in database

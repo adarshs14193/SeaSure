@@ -12,7 +12,7 @@ export const uploadCatch = async (req, res) => {
         const imageUrl = await uploadImage(
             req.file.buffer,
             req.file.mimetype,
-            vendorId
+            `catches/${vendorId}`
         ); // req.file.buffer contains the image data
         // Save catch details to database
 

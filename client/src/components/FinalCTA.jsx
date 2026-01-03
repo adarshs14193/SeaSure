@@ -1,11 +1,23 @@
 // eslint-disable-next-line no-unused-vars
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
+import { auth } from "../lib/firebase";
 
 export default function FinalCTA() {
+  const navigate = useNavigate();
+
+  const handleCheckFreshness = () => {
+    if (!auth.currentUser) {
+      navigate("/auth"); // not logged in → login/signup
+    } else {
+      navigate("/scan"); // logged in → scan page
+    }
+  };
+
   return (
     <section className="relative w-full py-44 px-4 sm:px-6 overflow-hidden">
 
-      {/* 🌟 Radial Spotlight (Highlight) */}
+      {/* 🌟 Radial Spotlight */}
       <div
         className="
           absolute inset-0
@@ -42,7 +54,6 @@ export default function FinalCTA() {
         viewport={{ once: false }}
         className="max-w-6xl mx-auto text-center relative z-10"
       >
-        {/* 🔹 Micro-label (anchors attention) */}
         <span className="
           inline-block
           mb-4
@@ -65,9 +76,8 @@ export default function FinalCTA() {
           Let AI verify freshness before you spend a single rupee.
         </p>
 
-        {/* 🎯 Floating CTA Button with Focus Ring */}
+        {/* 🎯 CTA */}
         <div className="relative mt-16 inline-block">
-          {/* Animated focus ring */}
           <motion.span
             animate={{ scale: [1, 1.25, 1], opacity: [0.6, 0, 0.6] }}
             transition={{ duration: 2.8, repeat: Infinity, ease: "easeOut" }}
@@ -84,7 +94,7 @@ export default function FinalCTA() {
             whileTap={{ scale: 0.95 }}
             animate={{ y: [0, -10, 0] }}
             transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-            onClick={() => window.location.href = "/login"}
+            onClick={handleCheckFreshness}
             className="
               relative
               bg-[#0A5A6A]

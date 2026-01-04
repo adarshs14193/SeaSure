@@ -3,6 +3,8 @@ import Home from "./pages/Home";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
 import Consumerdashboard from "./pages/Consumerdashboard";
+import Auth from "./pages/Auth";
+import Scan from "./pages/Scan";
 
 export default function App() {
   return (
@@ -11,6 +13,8 @@ export default function App() {
       <Route path="/about" element={<About />} />
       <Route path="/contact" element={<Contact />} />
       <Route path="/consumerdashboard" element={<Consumerdashboard />} />
+      <Route path="/auth" element={<Auth />} />
+      <Route path="/scan" element={<Scan />} />
     </Routes>
   );
 }

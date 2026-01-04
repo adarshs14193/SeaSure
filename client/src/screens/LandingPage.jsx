@@ -25,7 +25,7 @@ export default function LandingPage(){
                         So You Know Before You Buy.
                     </h3>
 
-                    <button className="mt-6 bg-[#2F6F4E] hover:bg-green-900 text-white px-4 py-2 rounded-4xl text-lg" onClick={() => window.location.href = '/login'}>
+                    <button className="mt-6 bg-[#2F6F4E] hover:bg-green-900 text-white px-4 py-2 rounded-4xl text-lg" onClick={() => window.location.href = '/auth'}>
                         Get Started
                     </button>
                     </div>

@@ -4,6 +4,7 @@ import ScanSection from "./sections/ScanSection";
 import StatusSection from "./sections/StatusSection";
 import ResultSection from "./sections/ResultSection";
 import ActionSection from "./sections/ActionSection";
+import PreScanInfo from "./sections/PreScanInfo";
 
 // mock hook – replace with your real firestore hook
 import { useScanListener } from "@/hooks/useScanListener";
@@ -24,6 +25,7 @@ export default function ConsumerDashboard() {
     <DashboardLayout>
       <ScanSection onScan={handleScan} loading={uploading} />
 
+        {!scan && <PreScanInfo />}
       {scan && (
         <>
           <StatusSection status={scan.analysisStatus} />

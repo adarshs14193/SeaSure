@@ -3,95 +3,97 @@ import admin from 'firebase-admin';
 import { analyzeFishImage } from '../services/vision.service.js';
 
 /**
- * Create a new consumer scan and trigger ML analysis
+ * CONSUMER BACKEND - POST-DELIVERY VALIDATION
+ * This NEVER changes vendor inventory or certification
+ * Only provides validation signals and cooking guidance
  */
-export const createScan = async ({ consumerId, imageUrl }) => {
-    if (!consumerId || !imageUrl) {
+
+/**
+ * Create consumer scan (VALIDATION ONLY, after delivery)
+ * Purpose: Validate vendor handling, NOT certify freshness
+ */
+export const createScan = async ({ consumerId, orderId, imageUrl }) => {
+    if (!consumerId || !orderId || !imageUrl) {
         throw new Error('INVALID_SCAN_DATA');
+    }
+    
+    // Verify order exists and was delivered
+    const orderDoc = await db.collection('orders').doc(orderId).get();
+    if (!orderDoc.exists) {
+        throw new Error('ORDER_NOT_FOUND');
+    }
+    
+    const order = orderDoc.data();
+    if (order.status !== 'DELIVERED') {
+        throw new Error('ORDER_NOT_DELIVERED_YET');
     }
     
     const scanRef = await db.collection('consumer_scans').add({
         consumerId,
+        orderId,
+        vendorId: order.vendorId,
+        fishType: order.fishType,
         imageUrl,
+        deliveryTime: order.deliveryTime,
         
-        analysisStatus: "Queued", // Queued, Processing, Completed, Failed
-        freshness: null,
-        cookWithin: null,
-        healthWarning: null,
-        confidenceScore: null,
-        analysisError: null,
+        // Validation results (NOT certification)
+        validationStatus: 'QUEUED', // QUEUED | PROCESSING | COMPLETED | FAILED
+        observedFreshnessScore: null,
+        confidence: null,
+        validationContext: 'post_delivery_validation',
+        
+        // Consumer guidance (separate from validation)
+        recipesProvided: false,
+        feedbackSubmitted: false,
         
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     
-    // Trigger ML analysis asynchronously (don't wait for it)
-    processScanAnalysis(scanRef.id, imageUrl).catch(err => {
-        console.error(`❌ ML analysis failed for scan ${scanRef.id}:`, err.message);
+    // Trigger validation analysis asynchronously
+    validateDelivery(scanRef.id, imageUrl).catch(err => {
+        console.error(`❌ Validation failed for scan ${scanRef.id}:`, err.message);
     });
     
     return scanRef;
 };
 
 /**
- * Process ML analysis for a consumer scan (internal function)
+ * Post-delivery validation (NOT certification)
+ * This provides signals for trust scoring, NOT inventory decisions
  */
-const processScanAnalysis = async (scanId, imageUrl) => {
+const validateDelivery = async (scanId, imageUrl) => {
     const scanRef = db.collection('consumer_scans').doc(scanId);
     
     try {
-        console.log(`🤖 Starting ML analysis for scan: ${scanId}`);
+        console.log(`🔍 Starting delivery validation for scan: ${scanId}`);
         
         // Update status to processing
         await scanRef.update({
-            analysisStatus: 'Processing',
-            analysisError: null
+            validationStatus: 'PROCESSING'
         });
 
-        // Run ML analysis
-        const result = await analyzeFishImage(imageUrl);
+        // Run ML in VALIDATION mode (not certification)
+        const mlResult = await analyzeFishImage(imageUrl);
 
-        console.log(`✅ ML analysis complete for scan ${scanId}:`, result);
+        console.log(`✅ Validation complete for scan ${scanId}:`, mlResult);
 
-        // Calculate cook within days based on freshness
-        let cookWithin;
-        let healthWarning = null;
-        
-        switch (result.freshness) {
-            case 'FRESH':
-                cookWithin = 5;
-                healthWarning = 'Fish is fresh! Safe to consume within 5 days if stored properly.';
-                break;
-            case 'MODERATE':
-                cookWithin = 2;
-                healthWarning = '⚠️ Cook thoroughly. Consume within 2 days.';
-                break;
-            case 'SPOILED':
-                cookWithin = 0;
-                healthWarning = '🚫 NOT RECOMMENDED for consumption. Fish appears spoiled.';
-                break;
-            default:
-                cookWithin = 1;
-                healthWarning = 'Consume with caution.';
-        }
-
-        // Update with results
+        // Store as OBSERVATION, not certification
         await scanRef.update({
-            analysisStatus: 'Completed',
-            freshness: result.freshness,
-            cookWithin,
-            healthWarning,
-            confidenceScore: result.confidenceScore,
-            analysisError: null,
+            validationStatus: 'COMPLETED',
+            observedFreshnessScore: mlResult.confidenceScore / 100,
+            confidence: mlResult.confidenceScore >= 70 ? 'HIGH' : 'LOW',
             completedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        // ⚠️ IMPORTANT: This NEVER changes vendor inventory or certification
+        console.log(`📊 Validation stored for trust analysis (order-level only)`);
+
     } catch (error) {
-        console.error(`❌ ML analysis error for scan ${scanId}:`, error.message);
+        console.error(`❌ Validation error for scan ${scanId}:`, error.message);
         
-        // Update with error
         await scanRef.update({
-            analysisStatus: 'Failed',
-            analysisError: error.message
+            validationStatus: 'FAILED',
+            validationError: error.message
         });
         
         throw error;
@@ -123,14 +125,59 @@ export const getConsumerScans = async (consumerId, limit = 50) => {
 };
 
 /**
- * Retry ML analysis for a failed scan
+ * Submit feedback (MOST IMPORTANT for trust scoring)
  */
-export const retryScanAnalysis = async (scanId) => {
-    const scanDoc = await getScan(scanId);
+export const submitFeedback = async (scanId, feedback) => {
+    const scanRef = db.collection('consumer_scans').doc(scanId);
+    const scan = await getScan(scanId);
     
-    if (!scanDoc.imageUrl) {
-        throw new Error('MISSING_IMAGE_URL');
+    await scanRef.update({
+        feedbackSubmitted: true,
+        feedback: {
+            agreedWithFreshness: feedback.agreedWithFreshness,
+            recipeHelpful: feedback.recipeHelpful,
+            comments: feedback.comments || '',
+            submittedAt: admin.firestore.FieldValue.serverTimestamp()
+        }
+    });
+    
+    // Trigger trust scoring update (async)
+    updateVendorTrustScore(scan.vendorId, scan.orderId, feedback).catch(err => {
+        console.error('Failed to update trust score:', err);
+    });
+};
+
+/**
+ * Update vendor trust score based on feedback
+ */
+const updateVendorTrustScore = async (vendorId, orderId, feedback) => {
+    // This aggregates feedback over time
+    // Vendor backend reads trust scores, not raw consumer scans
+    
+    const trustRef = db.collection('vendor_trust').doc(vendorId);
+    const trustDoc = await trustRef.get();
+    
+    if (!trustDoc.exists) {
+        await trustRef.set({
+            vendorId,
+            totalOrders: 1,
+            positiveValidations: feedback.agreedWithFreshness ? 1 : 0,
+            trustScore: feedback.agreedWithFreshness ? 1.0 : 0.0,
+            lastUpdated: new Date()
+        });
+    } else {
+        const trust = trustDoc.data();
+        const newTotal = trust.totalOrders + 1;
+        const newPositive = trust.positiveValidations + (feedback.agreedWithFreshness ? 1 : 0);
+        const newScore = newPositive / newTotal;
+        
+        await trustRef.update({
+            totalOrders: newTotal,
+            positiveValidations: newPositive,
+            trustScore: newScore,
+            lastUpdated: new Date()
+        });
     }
     
-    return await processScanAnalysis(scanId, scanDoc.imageUrl);
+    console.log(`📊 Trust score updated for vendor: ${vendorId}`);
 };

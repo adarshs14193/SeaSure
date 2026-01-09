@@ -2,7 +2,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 
 // Your deployed ML API endpoint (update after deployment)
-const ML_API_URL = process.env.ML_API_URL || 'https://seasure-backend.onrender.com';
+const ML_API_URL = process.env.ML_API_URL || 'http://35.200.179.245:8080';
 
 /**
  * Download image from URL and return as buffer

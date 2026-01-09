@@ -2,75 +2,107 @@ import { db } from '../config/firebase.js';
 import { analyzeFishImage } from '../services/vision.service.js';
 
 /**
- * Create a new catch and trigger ML analysis
+ * VENDOR BACKEND - STOCK INTAKE
+ * Creates batches from fishermen and certifies freshness via ML
  */
-export const createCatch = async ({ vendorId, imageUrl }) => {
-    if (!vendorId || !imageUrl) {
+
+/**
+ * Create a new catch batch (stock intake)
+ * This is the FIRST and ONLY freshness authority
+ */
+export const createCatch = async ({ vendorId, imageUrl, fishType, supplierName, quantity }) => {
+    if (!vendorId || !imageUrl || !fishType || !quantity) {
         throw new Error('INVALID_CATCH_DATA');
     }
     
-    const ref = await db.collection('catches').add({
+    // Create batch record
+    const batchRef = await db.collection('catches').add({
         vendorId,
+        supplierName: supplierName || 'Unknown Fisherman',
+        fishType,
+        quantity,
         imageUrl,
+        arrivalTime: new Date(),
         
-        // ML related fields
-        freshness: 'PENDING', // PENDING | FRESH | MODERATE | SPOILED
-        confidenceScore: null,
-        mlStatus: 'QUEUED', // QUEUED | PROCESSING | DONE | FAILED
+        // ML Certification fields (authoritative)
+        mlStatus: 'QUEUED', // QUEUED | PROCESSING | CERTIFIED | REJECTED | CONDITIONAL
+        freshnessScore: null,
+        grade: null, // A, B, C
+        estimatedValidHours: null,
+        certificationTime: null,
+        reasonKeys: [],
         mlError: null,
         
-        // Human verification fields
-        verified: false, 
-        verifiedBy: null,
-        verifiedAt: null,
+        // Inventory status
+        inventoryStatus: 'PENDING', // PENDING | IN_INVENTORY | REJECTED | EXPIRED
+        availableQuantity: quantity,
+        reservedQuantity: 0,
+        expiryTime: null,
         
         createdAt: new Date()
     });
     
-    // Trigger ML analysis asynchronously (don't wait for it)
-    processCatchAnalysis(ref.id, imageUrl).catch(err => {
-        console.error(`❌ ML analysis failed for catch ${ref.id}:`, err.message);
+    // Trigger ML certification asynchronously
+    certifyFreshness(batchRef.id, imageUrl).catch(err => {
+        console.error(`❌ ML certification failed for batch ${batchRef.id}:`, err.message);
     });
     
-    return ref;
+    return batchRef;
 };
 
 /**
- * Process ML analysis for a catch (internal function)
+ * ML Freshness Certification (Critical - Authoritative Truth)
+ * This is the ONLY place freshness decisions are made
  */
-const processCatchAnalysis = async (catchId, imageUrl) => {
-    const catchRef = db.collection('catches').doc(catchId);
+const certifyFreshness = async (batchId, imageUrl) => {
+    const batchRef = db.collection('catches').doc(batchId);
     
     try {
-        console.log(`🤖 Starting ML analysis for catch: ${catchId}`);
+        console.log(`🤖 Starting ML certification for batch: ${batchId}`);
         
         // Update status to processing
-        await catchRef.update({
+        await batchRef.update({
             mlStatus: 'PROCESSING',
             mlError: null
         });
 
-        // Run ML analysis
-        const result = await analyzeFishImage(imageUrl);
+        // Run ML analysis (authoritative freshness check)
+        const mlResult = await analyzeFishImage(imageUrl);
 
-        console.log(`✅ ML analysis complete for catch ${catchId}:`, result);
+        console.log(`✅ ML certification complete for batch ${batchId}:`, mlResult);
 
-        // Update with results
-        await catchRef.update({
-            freshness: result.freshness,
-            confidenceScore: result.confidenceScore,
-            mlStatus: 'DONE',
+        // Map ML result to certification
+        const certification = mapMLResultToCertification(mlResult);
+        
+        // Calculate expiry time
+        const expiryTime = new Date();
+        expiryTime.setHours(expiryTime.getHours() + certification.estimatedValidHours);
+
+        // Update with certification results
+        await batchRef.update({
+            mlStatus: certification.status,
+            freshnessScore: certification.freshnessScore,
+            grade: certification.grade,
+            estimatedValidHours: certification.estimatedValidHours,
+            certificationTime: new Date(),
+            reasonKeys: certification.reasonKeys,
             mlError: null,
-            analyzedAt: new Date()
+            
+            // Only CERTIFIED stock enters inventory
+            inventoryStatus: certification.status === 'CERTIFIED' ? 'IN_INVENTORY' : 'REJECTED',
+            expiryTime: certification.status === 'CERTIFIED' ? expiryTime : null
         });
 
+        console.log(`📦 Batch ${batchId} ${certification.status} - Grade: ${certification.grade}`);
+
     } catch (error) {
-        console.error(`❌ ML analysis error for catch ${catchId}:`, error.message);
+        console.error(`❌ ML certification error for batch ${batchId}:`, error.message);
         
         // Update with error
-        await catchRef.update({
-            mlStatus: 'FAILED',
-            mlError: error.message
+        await batchRef.update({
+            mlStatus: 'REJECTED',
+            mlError: error.message,
+            inventoryStatus: 'REJECTED'
         });
         
         throw error;
@@ -78,7 +110,51 @@ const processCatchAnalysis = async (catchId, imageUrl) => {
 };
 
 /**
- * Get catch by ID
+ * Map ML result to vendor certification format
+ */
+const mapMLResultToCertification = (mlResult) => {
+    let status, grade, estimatedValidHours, reasonKeys;
+    
+    switch (mlResult.freshness) {
+        case 'FRESH':
+            status = 'CERTIFIED';
+            grade = 'A';
+            estimatedValidHours = 36; // 1.5 days
+            reasonKeys = ['clear_gills', 'bright_eyes'];
+            break;
+            
+        case 'MODERATE':
+            status = 'CONDITIONAL';
+            grade = 'B';
+            estimatedValidHours = 18; // 18 hours
+            reasonKeys = ['acceptable_condition', 'moderate_freshness'];
+            break;
+            
+        case 'SPOILED':
+            status = 'REJECTED';
+            grade = 'C';
+            estimatedValidHours = 0;
+            reasonKeys = ['poor_quality', 'not_fresh'];
+            break;
+            
+        default:
+            status = 'REJECTED';
+            grade = 'C';
+            estimatedValidHours = 0;
+            reasonKeys = ['unknown_condition'];
+    }
+    
+    return {
+        status,
+        grade,
+        freshnessScore: mlResult.confidenceScore / 100, // Convert to 0-1 scale
+        estimatedValidHours,
+        reasonKeys
+    };
+};
+
+/**
+ * Get catch/batch by ID
  */
 export const getCatch = async (catchId) => {
     const doc = await db.collection('catches').doc(catchId).get();
@@ -89,7 +165,22 @@ export const getCatch = async (catchId) => {
 };
 
 /**
- * Get all catches for a vendor
+ * Get all certified inventory for a vendor (IN_INVENTORY only)
+ */
+export const getVendorInventory = async (vendorId, limit = 50) => {
+    const snapshot = await db.collection('catches')
+        .where('vendorId', '==', vendorId)
+        .where('inventoryStatus', '==', 'IN_INVENTORY')
+        .where('expiryTime', '>', new Date())
+        .orderBy('expiryTime', 'asc') // FIFO by expiry
+        .limit(limit)
+        .get();
+    
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
+
+/**
+ * Get all catches for a vendor (including rejected/expired)
  */
 export const getVendorCatches = async (vendorId, limit = 50) => {
     const snapshot = await db.collection('catches')
@@ -102,14 +193,48 @@ export const getVendorCatches = async (vendorId, limit = 50) => {
 };
 
 /**
- * Retry ML analysis for a failed catch
+ * Reserve inventory for an order (order fulfillment)
  */
-export const retryCatchAnalysis = async (catchId) => {
+export const reserveInventory = async (catchId, quantity) => {
+    const catchRef = db.collection('catches').doc(catchId);
     const catchDoc = await getCatch(catchId);
     
-    if (!catchDoc.imageUrl) {
-        throw new Error('MISSING_IMAGE_URL');
+    if (catchDoc.inventoryStatus !== 'IN_INVENTORY') {
+        throw new Error('INVENTORY_NOT_AVAILABLE');
     }
     
-    return await processCatchAnalysis(catchId, catchDoc.imageUrl);
+    if (catchDoc.expiryTime < new Date()) {
+        throw new Error('INVENTORY_EXPIRED');
+    }
+    
+    if (catchDoc.availableQuantity < quantity) {
+        throw new Error('INSUFFICIENT_QUANTITY');
+    }
+    
+    await catchRef.update({
+        availableQuantity: catchDoc.availableQuantity - quantity,
+        reservedQuantity: catchDoc.reservedQuantity + quantity
+    });
+};
+
+/**
+ * Background job: Expire old inventory
+ */
+export const expireOldInventory = async () => {
+    const now = new Date();
+    const snapshot = await db.collection('catches')
+        .where('inventoryStatus', '==', 'IN_INVENTORY')
+        .where('expiryTime', '<=', now)
+        .get();
+    
+    const batch = db.batch();
+    snapshot.docs.forEach(doc => {
+        batch.update(doc.ref, { 
+            inventoryStatus: 'EXPIRED',
+            availableQuantity: 0
+        });
+    });
+    
+    await batch.commit();
+    console.log(`⏰ Expired ${snapshot.size} inventory items`);
 };

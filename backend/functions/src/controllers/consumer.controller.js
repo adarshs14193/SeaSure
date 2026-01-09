@@ -1,37 +1,51 @@
-import { createScan } from '../models/consumerScan.model.js';
+import { createScan, getScan, getConsumerScans, submitFeedback } from '../models/consumerScan.model.js';
 
 /**
- * Create consumer scan and trigger ML analysis
+ * CONSUMER CONTROLLER - DEMAND SIDE
+ * Post-delivery validation and cooking guidance
+ */
+
+/**
+ * Create consumer scan (VALIDATION ONLY, after delivery)
  * Route: POST /api/consumers/scan
  */
 export const createConsumerScan = async (req, res) => {
     try {
-        const consumerId = req.user.uid; // From auth middleware
-        const imageUrl = req.file?.url; // From upload middleware (Firebase Storage URL)
+        const consumerId = req.user.uid;
+        const imageUrl = req.file?.url; // From Firebase Storage
+        const { orderId } = req.body;
         
         if (!imageUrl) {
             return res.status(400).json({
                 success: false,
-                error: 'Image upload failed. No image URL received.'
+                error: 'Image upload failed'
             });
         }
         
-        console.log('🔍 Scan initiated by consumer:', consumerId);
-        console.log('🖼️  Image URL:', imageUrl);
+        if (!orderId) {
+            return res.status(400).json({
+                success: false,
+                error: 'orderId is required'
+            });
+        }
         
-        // Create scan in Firestore and trigger ML analysis
+        console.log('🔍 Validation scan by consumer:', consumerId);
+        console.log('📦 Order ID:', orderId);
+        
+        // Create validation scan
         const scanRef = await createScan({ 
             consumerId, 
+            orderId,
             imageUrl 
         });
         
         res.status(201).json({
             success: true,
-            message: 'Fish scan initiated. AI analysis in progress.',
+            message: 'Validation scan initiated. This helps us improve quality.',
             data: {
                 scanId: scanRef.id,
-                imageUrl,
-                analysisStatus: 'Queued'
+                orderId,
+                validationStatus: 'QUEUED'
             }
         });
         
@@ -39,20 +53,26 @@ export const createConsumerScan = async (req, res) => {
         console.error('❌ Create scan error:', error);
         res.status(500).json({
             success: false,
-            error: error.message || 'Failed to create scan'
+            error: error.message
         });
     }
 };
 
 /**
- * Get scan by ID (optional - add to routes if needed)
+ * Get scan details
  */
-export const getScan = async (req, res) => {
+export const getScanDetails = async (req, res) => {
     try {
         const { scanId } = req.params;
-        const { getScan: getScanModel } = await import('../models/consumerScan.model.js');
+        const scanData = await getScan(scanId);
         
-        const scanData = await getScanModel(scanId);
+        // Verify ownership
+        if (scanData.consumerId !== req.user.uid) {
+            return res.status(403).json({
+                success: false,
+                error: 'Not authorized'
+            });
+        }
         
         res.json({
             success: true,
@@ -68,15 +88,12 @@ export const getScan = async (req, res) => {
 };
 
 /**
- * Get all scans for logged-in consumer (optional - add to routes if needed)
+ * Get all consumer scans
  */
 export const getMyScans = async (req, res) => {
     try {
         const consumerId = req.user.uid;
-        const limit = parseInt(req.query.limit) || 50;
-        
-        const { getConsumerScans } = await import('../models/consumerScan.model.js');
-        const scans = await getConsumerScans(consumerId, limit);
+        const scans = await getConsumerScans(consumerId);
         
         res.json({
             success: true,
@@ -85,6 +102,45 @@ export const getMyScans = async (req, res) => {
         });
     } catch (error) {
         console.error('Get scans error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Submit feedback (MOST IMPORTANT)
+ * Route: POST /api/consumers/scans/:scanId/feedback
+ */
+export const submitScanFeedback = async (req, res) => {
+    try {
+        const { scanId } = req.params;
+        const { agreedWithFreshness, recipeHelpful, comments } = req.body;
+        
+        const scanData = await getScan(scanId);
+        
+        // Verify ownership
+        if (scanData.consumerId !== req.user.uid) {
+            return res.status(403).json({
+                success: false,
+                error: 'Not authorized'
+            });
+        }
+        
+        await submitFeedback(scanId, {
+            agreedWithFreshness: agreedWithFreshness === true,
+            recipeHelpful: recipeHelpful === true,
+            comments: comments || ''
+        });
+        
+        res.json({
+            success: true,
+            message: 'Feedback submitted. Thank you for helping us improve!'
+        });
+        
+    } catch (error) {
+        console.error('Submit feedback error:', error);
         res.status(500).json({
             success: false,
             error: error.message

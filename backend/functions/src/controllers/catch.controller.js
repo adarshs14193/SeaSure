@@ -1,36 +1,53 @@
-import { createCatch } from '../models/catch.model.js';
+import { createCatch, getCatch, getVendorInventory, getVendorCatches } from '../models/catch.model.js';
 
 /**
- * Upload catch and trigger ML analysis
+ * VENDOR CONTROLLER - SUPPLY SIDE
+ * Stock intake and certification
+ */
+
+/**
+ * Upload catch (Stock Intake - Camera Only, Controlled Environment)
  * Route: POST /api/catches/upload
  */
 export const uploadCatch = async (req, res) => {
     try {
-        const vendorId = req.user.uid; // From auth middleware
-        const imageUrl = req.file?.url; // From upload middleware (Firebase Storage URL)
+        const vendorId = req.user.uid;
+        const imageUrl = req.file?.url; // From Firebase Storage
+        const { fishType, supplierName, quantity } = req.body;
         
         if (!imageUrl) {
             return res.status(400).json({
                 success: false,
-                error: 'Image upload failed. No image URL received.'
+                error: 'Image upload failed'
             });
         }
         
-        console.log('📸 Catch uploaded by vendor:', vendorId);
-        console.log('🖼️  Image URL:', imageUrl);
+        if (!fishType || !quantity) {
+            return res.status(400).json({
+                success: false,
+                error: 'fishType and quantity are required'
+            });
+        }
         
-        // Create catch in Firestore and trigger ML analysis
-        const catchRef = await createCatch({ 
+        console.log('📸 Stock intake by vendor:', vendorId);
+        console.log('🐟 Fish type:', fishType, '| Quantity:', quantity);
+        
+        // Create batch and trigger ML certification
+        const batchRef = await createCatch({ 
             vendorId, 
-            imageUrl 
+            imageUrl,
+            fishType,
+            supplierName,
+            quantity: parseInt(quantity)
         });
         
         res.status(201).json({
             success: true,
-            message: 'Catch uploaded successfully. AI analysis in progress.',
+            message: 'Batch created. ML certification in progress.',
             data: {
-                catchId: catchRef.id,
-                imageUrl,
+                batchId: batchRef.id,
+                fishType,
+                quantity,
                 mlStatus: 'QUEUED'
             }
         });
@@ -39,28 +56,27 @@ export const uploadCatch = async (req, res) => {
         console.error('❌ Upload catch error:', error);
         res.status(500).json({
             success: false,
-            error: error.message || 'Failed to upload catch'
+            error: error.message
         });
     }
 };
 
 /**
- * Get catch by ID (optional - add to routes if needed)
+ * Get vendor's certified inventory (IN_INVENTORY only)
  */
-export const getCatch = async (req, res) => {
+export const getMyInventory = async (req, res) => {
     try {
-        const { catchId } = req.params;
-        const { getCatch: getCatchModel } = await import('../models/catch.model.js');
-        
-        const catchData = await getCatchModel(catchId);
+        const vendorId = req.user.uid;
+        const inventory = await getVendorInventory(vendorId);
         
         res.json({
             success: true,
-            data: catchData
+            count: inventory.length,
+            data: inventory
         });
     } catch (error) {
-        const status = error.message === 'CATCH_NOT_FOUND' ? 404 : 500;
-        res.status(status).json({
+        console.error('Get inventory error:', error);
+        res.status(500).json({
             success: false,
             error: error.message
         });
@@ -68,15 +84,12 @@ export const getCatch = async (req, res) => {
 };
 
 /**
- * Get all catches for logged-in vendor (optional - add to routes if needed)
+ * Get all vendor catches (including rejected/expired)
  */
 export const getMyCatches = async (req, res) => {
     try {
         const vendorId = req.user.uid;
-        const limit = parseInt(req.query.limit) || 50;
-        
-        const { getVendorCatches } = await import('../models/catch.model.js');
-        const catches = await getVendorCatches(vendorId, limit);
+        const catches = await getVendorCatches(vendorId);
         
         res.json({
             success: true,
@@ -86,6 +99,35 @@ export const getMyCatches = async (req, res) => {
     } catch (error) {
         console.error('Get catches error:', error);
         res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get specific catch/batch details
+ */
+export const getCatchDetails = async (req, res) => {
+    try {
+        const { catchId } = req.params;
+        const catchData = await getCatch(catchId);
+        
+        // Verify ownership
+        if (catchData.vendorId !== req.user.uid) {
+            return res.status(403).json({
+                success: false,
+                error: 'Not authorized'
+            });
+        }
+        
+        res.json({
+            success: true,
+            data: catchData
+        });
+    } catch (error) {
+        const status = error.message === 'CATCH_NOT_FOUND' ? 404 : 500;
+        res.status(status).json({
             success: false,
             error: error.message
         });

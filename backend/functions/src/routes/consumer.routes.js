@@ -6,7 +6,8 @@ import {
     createConsumerScan, 
     getScanDetails, 
     getMyScans,
-    submitScanFeedback 
+    submitScanFeedback,
+    getRecipesForScan  // ← NEW
 } from '../controllers/consumer.controller.js';
 
 const router = express.Router();
@@ -19,6 +20,9 @@ router.get('/scans/:scanId', requireAuth, requireRole('CUSTOMER'), getScanDetail
 
 // Get all my scans
 router.get('/my-scans', requireAuth, requireRole('CUSTOMER'), getMyScans);
+
+// Get recipes for a scan (NEW)
+router.post('/scans/:scanId/recipes', requireAuth, requireRole('CUSTOMER'), getRecipesForScan);
 
 // Submit feedback
 router.post('/scans/:scanId/feedback', requireAuth, requireRole('CUSTOMER'), submitScanFeedback);

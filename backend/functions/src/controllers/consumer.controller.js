@@ -110,9 +110,54 @@ export const getMyScans = async (req, res) => {
 };
 
 /**
- * Submit feedback (MOST IMPORTANT)
- * Route: POST /api/consumers/scans/:scanId/feedback
+ * Get recipes for a scan (after validation)
+ * Route: POST /api/consumers/scans/:scanId/recipes
  */
+export const getRecipesForScan = async (req, res) => {
+    try {
+        const { scanId } = req.params;
+        const { location, spiceLevel, habit } = req.body;
+        
+        const scanData = await getScan(scanId);
+        
+        // Verify ownership
+        if (scanData.consumerId !== req.user.uid) {
+            return res.status(403).json({
+                success: false,
+                error: 'Not authorized'
+            });
+        }
+        
+        // Get recipes
+        const { getRecipesForScan: getRecipesModel } = await import('../models/consumerScan.model.js');
+        
+        const recipes = await getRecipesModel(scanId, {
+            location,
+            spiceLevel,
+            habit
+        });
+        
+        res.json({
+            success: true,
+            data: recipes
+        });
+        
+    } catch (error) {
+        console.error('Get recipes error:', error);
+        
+        if (error.message === 'VALIDATION_NOT_COMPLETE') {
+            return res.status(400).json({
+                success: false,
+                error: 'Validation must be completed before getting recipes'
+            });
+        }
+        
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
 export const submitScanFeedback = async (req, res) => {
     try {
         const { scanId } = req.params;

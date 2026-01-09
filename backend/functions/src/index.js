@@ -6,6 +6,7 @@ import { upload } from "./middlewares/upload.middleware.js"; // Import your midd
 import authRoutes from "./routes/auth.routes.js";
 import catchRoutes from "./routes/catch.routes.js";
 import consumerRoutes from "./routes/consumer.routes.js";
+import { checkRecipeApiHealth } from './services/recipe.service.js';
 
 const app = express();
 const PORT = 3002;
@@ -76,6 +77,21 @@ app.post("/api/predict-freshness", upload.fields([
     }
 });
 
+app.get('/api/health/recipe', async (req, res) => {
+    try {
+        const health = await checkRecipeApiHealth();
+        res.json({
+            success: true,
+            recipeApi: health
+        });
+    } catch (error) {
+        res.status(503).json({
+            success: false,
+            error: 'Recipe API unavailable',
+            details: error.message
+        });
+    }
+});
 // Mount other routes with consistent /api prefix
 app.use("/api/auth", authRoutes);
 app.use("/api/catch", catchRoutes);

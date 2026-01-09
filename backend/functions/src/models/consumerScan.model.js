@@ -190,6 +190,56 @@ export const submitFeedback = async (scanId, feedback) => {
 };
 
 /**
+ * Get recipes for a scan (after validation complete)
+ */
+export const getRecipesForScan = async (scanId, preferences = {}) => {
+    const scan = await getScan(scanId);
+    
+    if (scan.validationStatus !== 'COMPLETED') {
+        throw new Error('VALIDATION_NOT_COMPLETE');
+    }
+    
+    const { getRecipes } = await import('../services/recipe.service.js');
+    
+    // Get recipes from RAG API
+    const recipeData = await getRecipes({
+        fish: scan.fishType,
+        location: preferences.location || 'Kerala',
+        spiceLevel: preferences.spiceLevel || 'medium',
+        habit: preferences.habit || 'regular'
+    });
+    
+    // Store that recipes were fetched
+    const scanRef = db.collection('consumer_scans').doc(scanId);
+    await scanRef.update({
+        recipesProvided: true,
+        recipesFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
+        recipePreferences: preferences
+    });
+    
+    return recipeData;
+};
+const logFeedbackEvent = async (eventData) => {
+    const eventId = `EVT_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const event = {
+        eventId,
+        eventType: 'FEEDBACK_SUBMITTED',
+        orderId: eventData.orderId,
+        vendorId: eventData.vendorId,
+        rating: eventData.rating,
+        agreedWithFreshness: eventData.agreedWithFreshness,
+        recipeHelpful: eventData.recipeHelpful,
+        hasComment: eventData.hasComment,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    await db.collection('feedback_events').add(event);
+    
+    console.log(`📊 Feedback event logged: ${eventId} for order ${eventData.orderId}`);
+};
+
+/**
  * Update vendor trust score based on feedback
  */
 const updateVendorTrustScore = async (vendorId, orderId, feedback) => {
@@ -199,23 +249,35 @@ const updateVendorTrustScore = async (vendorId, orderId, feedback) => {
     const trustRef = db.collection('vendor_trust').doc(vendorId);
     const trustDoc = await trustRef.get();
     
+    const rating = feedback.rating || 0;
+    const positiveValidation = feedback.agreedWithFreshness ? 1 : 0;
+    
     if (!trustDoc.exists) {
         await trustRef.set({
             vendorId,
             totalOrders: 1,
-            positiveValidations: feedback.agreedWithFreshness ? 1 : 0,
-            trustScore: feedback.agreedWithFreshness ? 1.0 : 0.0,
+            positiveValidations: positiveValidation,
+            totalRatingSum: rating,
+            ratingCount: rating > 0 ? 1 : 0,
+            averageRating: rating || null,
+            trustScore: positiveValidation,
             lastUpdated: new Date()
         });
     } else {
         const trust = trustDoc.data();
         const newTotal = trust.totalOrders + 1;
-        const newPositive = trust.positiveValidations + (feedback.agreedWithFreshness ? 1 : 0);
+        const newPositive = trust.positiveValidations + positiveValidation;
+        const newRatingSum = (trust.totalRatingSum || 0) + rating;
+        const newRatingCount = (trust.ratingCount || 0) + (rating > 0 ? 1 : 0);
+        const newAvgRating = newRatingCount > 0 ? newRatingSum / newRatingCount : null;
         const newScore = newPositive / newTotal;
         
         await trustRef.update({
             totalOrders: newTotal,
             positiveValidations: newPositive,
+            totalRatingSum: newRatingSum,
+            ratingCount: newRatingCount,
+            averageRating: newAvgRating,
             trustScore: newScore,
             lastUpdated: new Date()
         });

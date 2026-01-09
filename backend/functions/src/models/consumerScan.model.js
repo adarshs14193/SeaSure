@@ -131,20 +131,62 @@ export const submitFeedback = async (scanId, feedback) => {
     const scanRef = db.collection('consumer_scans').doc(scanId);
     const scan = await getScan(scanId);
     
+    // Validate rating
+    if (feedback.rating && (feedback.rating < 1 || feedback.rating > 5)) {
+        throw new Error('INVALID_RATING: Rating must be between 1 and 5');
+    }
+    
+    // Validate comment length
+    if (feedback.comment && feedback.comment.length > 300) {
+        throw new Error('COMMENT_TOO_LONG: Comment must be 300 characters or less');
+    }
+    
+    // Create feedback record in dedicated collection
+    const feedbackData = {
+        feedbackId: db.collection('feedback').doc().id,
+        orderId: scan.orderId,
+        vendorId: scan.vendorId,
+        consumerId: scan.consumerId,
+        scanId: scanId,
+        rating: feedback.rating || null,
+        agreedWithFreshness: feedback.agreedWithFreshness === true,
+        recipeHelpful: feedback.recipeHelpful === true,
+        comment: feedback.comment ? feedback.comment.trim() : null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    // Store in feedback collection (append-only)
+    const feedbackRef = await db.collection('feedback').add(feedbackData);
+    
+    // Update scan document
     await scanRef.update({
         feedbackSubmitted: true,
+        feedbackId: feedbackRef.id,
         feedback: {
             agreedWithFreshness: feedback.agreedWithFreshness,
             recipeHelpful: feedback.recipeHelpful,
-            comments: feedback.comments || '',
+            rating: feedback.rating || null,
+            hasComment: !!feedback.comment,
             submittedAt: admin.firestore.FieldValue.serverTimestamp()
         }
+    });
+    
+    // Log immutable event
+    await logFeedbackEvent({
+        orderId: scan.orderId,
+        vendorId: scan.vendorId,
+        rating: feedback.rating || null,
+        agreedWithFreshness: feedback.agreedWithFreshness,
+        recipeHelpful: feedback.recipeHelpful,
+        hasComment: !!feedback.comment
     });
     
     // Trigger trust scoring update (async)
     updateVendorTrustScore(scan.vendorId, scan.orderId, feedback).catch(err => {
         console.error('Failed to update trust score:', err);
     });
+    
+    return feedbackRef.id;
 };
 
 /**

@@ -116,7 +116,7 @@ export const getMyScans = async (req, res) => {
 export const submitScanFeedback = async (req, res) => {
     try {
         const { scanId } = req.params;
-        const { agreedWithFreshness, recipeHelpful, comments } = req.body;
+        const { agreedWithFreshness, recipeHelpful, rating, comment } = req.body;
         
         const scanData = await getScan(scanId);
         
@@ -128,15 +128,35 @@ export const submitScanFeedback = async (req, res) => {
             });
         }
         
-        await submitFeedback(scanId, {
+        // Validate rating if provided
+        if (rating !== undefined && rating !== null) {
+            if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Rating must be an integer between 1 and 5'
+                });
+            }
+        }
+        
+        // Validate comment length if provided
+        if (comment && comment.length > 300) {
+            return res.status(400).json({
+                success: false,
+                error: 'Comment must be 300 characters or less'
+            });
+        }
+        
+        const feedbackId = await submitFeedback(scanId, {
             agreedWithFreshness: agreedWithFreshness === true,
             recipeHelpful: recipeHelpful === true,
-            comments: comments || ''
+            rating: rating || null,
+            comment: comment || null
         });
         
         res.json({
             success: true,
-            message: 'Feedback submitted. Thank you for helping us improve!'
+            message: 'Feedback submitted. Thank you for helping us improve!',
+            feedbackId
         });
         
     } catch (error) {

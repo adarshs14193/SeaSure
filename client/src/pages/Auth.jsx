@@ -26,7 +26,10 @@ const Auth = () => {
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
-      navigate("/consumer-dashboard");
+
+      // ✅ FIX: GO TO ROLE SELECTION (Vendor / Consumer)
+      navigate("/role");
+
     } catch (err) {
       setError(err.message);
     } finally {
@@ -40,9 +43,7 @@ const Auth = () => {
         
         {/* Logo / Title */}
         <div className="text-center mb-6">
-          
           <h1 className="text-3xl font-bold text-teal-700">
-            
             SeaSure
           </h1>
           <p className="text-slate-500 mt-1">

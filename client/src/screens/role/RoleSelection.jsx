@@ -20,7 +20,7 @@ export default function RoleSelection() {
         </motion.h1>
 
         <p className="text-slate-600 mb-10 text-center">
-          Choose your role — you can switch anytime 🌊
+          Choose your role you can switch anytime 🌊
         </p>
 
         {/* Role Cards */}
@@ -39,7 +39,7 @@ export default function RoleSelection() {
             </h2>
             <p className="text-slate-600 text-sm">
               Upload fish details, get AI-powered freshness scores,
-              manage orders, and reach nearby customers.
+              manage orders and reach nearby customers.
             </p>
           </motion.div>
 
@@ -47,7 +47,7 @@ export default function RoleSelection() {
           <motion.div
             whileHover={{ y: -8, scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => navigate("/consumer")}
+            onClick={() => navigate("/consumer-dashboard")}
             className="cursor-pointer bg-white rounded-2xl shadow-lg p-8 border border-[#B2EBF2]"
           >
             <div className="text-5xl mb-4">🛒</div>
@@ -56,7 +56,7 @@ export default function RoleSelection() {
             </h2>
             <p className="text-slate-600 text-sm">
               Discover fresh fish from nearby vendors,
-              track delivery live, and explore recipes & health benefits.
+              track delivery live and explore recipes & health benefits.
             </p>
           </motion.div>
 

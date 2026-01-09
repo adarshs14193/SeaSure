@@ -2,10 +2,13 @@ import { useState } from "react";
 import OceanEntry from "@/components/animations/OceanEntry";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import FishCard from "@/components/cards/FishCard";
+import { placeOrder } from "@/lib/orderStore";
+import { useNavigate } from "react-router-dom";
 
 export default function ConsumerDashboard() {
+  // eslint-disable-next-line no-unused-vars
   const [ordered, setOrdered] = useState(false);
-
+const navigate = useNavigate();
   const fishes = [
     {
       name: "Pomfret",
@@ -21,12 +24,14 @@ export default function ConsumerDashboard() {
     <OceanEntry>
       <DashboardLayout title="Fresh Fish Near You 🐟">
         <div className="space-y-4">
-          {fishes.map((fish, i) => (
+          {fishes.map((fish) => (
             <FishCard
-              key={i}
-              fish={fish}
-              onOrder={() => setOrdered(true)}
-            />
+                fish={fish}
+                onOrder={() => {
+                    placeOrder(fish);
+                    navigate("/consumer/track");
+                }}
+                />  
           ))}
         </div>
 
